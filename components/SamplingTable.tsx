@@ -120,7 +120,7 @@ const SamplingTable: React.FC<SamplingTableProps> = ({onSelectionChange}) => {
             <span className="text-xs font-medium text-slate-500 mb-1">
               Pool (<MathRenderer text={`$n=${n}$`}/>)
             </span>
-                        <div className="flex gap-2 flex-wrap justify-center max-w-[200px]">
+                        <div className="flex gap-2 flex-wrap justify-center max-w-[280px]">
                             {items.map(i => (
                                 <div key={i}
                                      className="w-8 h-8 rounded-full bg-indigo-500 text-white flex items-center justify-center shadow-sm font-bold text-sm">
@@ -137,8 +137,7 @@ const SamplingTable: React.FC<SamplingTableProps> = ({onSelectionChange}) => {
             Selection (<MathRenderer text={`$k=${k}$`}/>)
           </span>
 
-                        {/* Changed from flex flex-wrap to grid grid-cols-3 */}
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="flex gap-2 flex-wrap justify-center max-w-[280px]">
                             {Array.from({length: k}).map((_, i) => (
                                 <div key={i}
                                      className={`w-10 h-10 border-2 flex-shrink-0 ${orderMatters ? 'border-dashed border-indigo-300' : 'border-slate-300 rounded-full'} flex items-center justify-center bg-white text-slate-400 text-xs`}>
@@ -159,7 +158,7 @@ const SamplingTable: React.FC<SamplingTableProps> = ({onSelectionChange}) => {
     };
 
     return (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto">
+        <div className="bg-white rounded-xl border border-slate-200 p-6 max-w-4xl mx-auto shadow-sm">
             <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-2">
                 <Hash className="w-6 h-6 text-indigo-600"/>
                 The Sampling Table

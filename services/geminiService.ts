@@ -1,7 +1,7 @@
 import {GoogleGenAI, Type, Schema} from '@google/genai';
 import {Difficulty, QuizQuestion} from '../types';
 import {QUIZ_DIFFICULTY_GUIDE} from '../quizDifficulty';
-import {normalizeQuizQuestion} from './llmFormatting';
+import {normalizeQuizQuestion, escapeRawJsonMathBackslashes} from './llmFormatting';
 
 type Provider = 'gemini' | 'ollama';
 type AppEnv = Record<string, string | undefined>;
@@ -42,13 +42,148 @@ export interface OllamaChatResponseMessage {
     thinking: string;
 }
 
-const env = ((import.meta as ImportMeta & { env?: AppEnv }).env ?? {});
+const getEnv = (): AppEnv => {
+    const metaEnv = ((import.meta as ImportMeta & { env?: AppEnv }).env ?? {});
+    const processEnv = typeof process !== 'undefined' ? (process.env as AppEnv) : {};
+    return {
+        ...metaEnv,
+        ...processEnv
+    };
+};
 
-const provider = getProvider();
-const geminiApiKey = env.VITE_GEMINI_API_KEY ?? '';
-const geminiModel = env.VITE_GEMINI_MODEL ?? 'gemini-3.1-flash-lite-preview';
-const ollamaBaseUrl = env.VITE_OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434';
-const ollamaModel = env.VITE_OLLAMA_MODEL ?? 'gemma4:latest';
+export interface LlmSettings {
+    provider: 'gemini' | 'ollama';
+    geminiApiKey: string;
+    geminiModel: string;
+    ollamaBaseUrl: string;
+    ollamaModel: string;
+}
+
+export const getLlmSettings = (): LlmSettings => {
+    const currentEnv = getEnv();
+    const storedProvider = localStorage.getItem('probality_llm_provider') as 'gemini' | 'ollama' | null;
+    
+    // API Key resolution helper
+    const getResolvedApiKey = () => {
+        const sessionApiKey = sessionStorage.getItem('probality_gemini_api_key');
+        if (sessionApiKey !== null) {
+            return sessionApiKey;
+        }
+        const rawApiKey = currentEnv.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : '') || '';
+        return rawApiKey === 'PLACEHOLDER_API_KEY' ? '' : rawApiKey;
+    };
+
+    const resolvedApiKey = getResolvedApiKey();
+
+    let resolvedProvider: 'gemini' | 'ollama';
+    if (storedProvider === 'gemini' || storedProvider === 'ollama') {
+        resolvedProvider = storedProvider;
+    } else {
+        const envProvider = currentEnv.VITE_LLM_PROVIDER?.trim().toLowerCase();
+        if (envProvider === 'gemini' || envProvider === 'ollama') {
+            resolvedProvider = envProvider;
+        } else {
+            resolvedProvider = resolvedApiKey ? 'gemini' : 'ollama';
+        }
+    }
+
+    const storedGeminiModel = localStorage.getItem('probality_gemini_model');
+    const resolvedGeminiModel = storedGeminiModel || currentEnv.VITE_GEMINI_MODEL || 'gemini-3.1-flash-lite-preview';
+
+    const storedOllamaBaseUrl = localStorage.getItem('probality_ollama_base_url');
+    const resolvedOllamaBaseUrl = storedOllamaBaseUrl || currentEnv.VITE_OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+
+    const storedOllamaModel = localStorage.getItem('probality_ollama_model');
+    const resolvedOllamaModel = storedOllamaModel || currentEnv.VITE_OLLAMA_MODEL || 'gemma4:latest';
+
+    return {
+        provider: resolvedProvider,
+        geminiApiKey: resolvedApiKey,
+        geminiModel: resolvedGeminiModel,
+        ollamaBaseUrl: resolvedOllamaBaseUrl,
+        ollamaModel: resolvedOllamaModel,
+    };
+};
+
+export const updateLlmSettings = (updates: Partial<LlmSettings>): LlmSettings => {
+    if (updates.provider) {
+        localStorage.setItem('probality_llm_provider', updates.provider);
+    }
+    if (updates.geminiApiKey !== undefined) {
+        sessionStorage.setItem('probality_gemini_api_key', updates.geminiApiKey);
+    }
+    if (updates.geminiModel) {
+        localStorage.setItem('probality_gemini_model', updates.geminiModel);
+    }
+    if (updates.ollamaBaseUrl) {
+        localStorage.setItem('probality_ollama_base_url', updates.ollamaBaseUrl);
+    }
+    if (updates.ollamaModel) {
+        localStorage.setItem('probality_ollama_model', updates.ollamaModel);
+    }
+
+    const newSettings = getLlmSettings();
+    window.dispatchEvent(new CustomEvent('probality_llm_settings_changed', { detail: newSettings }));
+    return newSettings;
+};
+
+export interface ConnectionTestResult {
+    success: boolean;
+    message: string;
+    models?: string[];
+}
+
+export const testOllamaConnection = async (baseUrl: string): Promise<ConnectionTestResult> => {
+    try {
+        const response = await fetch(`${baseUrl}/api/tags`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+            },
+        });
+        if (!response.ok) {
+            return { success: false, message: `Server returned status ${response.status}.` };
+        }
+        const data = await response.json();
+        const models = (data.models || []).map((m: any) => m.name);
+        return {
+            success: true,
+            message: 'Connected successfully!',
+            models,
+        };
+    } catch (error) {
+        return {
+            success: false,
+            message: 'Could not connect. Is Ollama running on your system?',
+        };
+    }
+};
+
+export const testGeminiConnection = async (apiKey: string, model: string): Promise<ConnectionTestResult> => {
+    if (!apiKey) {
+        return { success: false, message: 'API key is missing.' };
+    }
+    try {
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: 'Say only the word "OK"',
+            config: {
+                maxOutputTokens: 5,
+            },
+        });
+        if (response.text) {
+            return { success: true, message: 'Connected successfully!' };
+        }
+        return { success: false, message: 'Empty response received from Gemini.' };
+    } catch (error: any) {
+        return {
+            success: false,
+            message: error?.message || 'Connection failed. Please check your API key.',
+        };
+    }
+};
+
 const tutorSystemInstruction = `You are Dr. B, a friendly and rigorous probability professor in the style of Joe Blitzstein. You love story proofs, building intuition before formulas, and helping students navigate the four types of sampling (ordered/unordered, with/without replacement).
 
 Scope: You only help with the following topics from this course: the Naive Definition of Probability, the Multiplication Rule, the Sampling Table, and Story Proofs. If a student asks about anything outside these four topics, warmly redirect them: "That's beyond what we're covering here — let's get back to [relevant topic]."
@@ -76,93 +211,217 @@ const quizSchema: Schema = {
     type: Type.OBJECT,
     properties: {
         question: {type: Type.STRING, description: 'The probability problem text.'},
+        explanation: {type: Type.STRING, description: 'A detailed explanation of the solution. Solve the problem completely here first before writing options or correctIndex.'},
         options: {
             type: Type.ARRAY,
             items: {type: Type.STRING},
             description: 'Exactly four possible answers.',
         },
         correctIndex: {type: Type.INTEGER, description: 'The index (0-3) of the correct answer.'},
-        explanation: {type: Type.STRING, description: 'A detailed explanation of the solution.'},
     },
-    required: ['question', 'options', 'correctIndex', 'explanation'],
+    required: ['question', 'explanation', 'options', 'correctIndex'],
 };
 
-const fallbackQuizQuestionEasy: QuizQuestion = {
-    question:
-        "A bag contains 3 red balls and 2 blue balls. If you draw one ball at random, what is the probability it is red?",
-    options: ["$\\frac{1}{5}$", "$\\frac{2}{5}$", "$\\frac{3}{5}$", "$\\frac{3}{2}$"],
-    correctIndex: 2,
-    explanation:
-        "By the naive definition, $P(A) = \\frac{|A|}{|S|}$. There are 3 red balls out of 5 equally likely outcomes, so $P(\\text{red}) = \\frac{3}{5}$. The option $\\frac{3}{2}$ is a classic error of dividing favorable by unfavorable outcomes instead of total outcomes.",
+const FALLBACK_QUESTIONS: Record<string, Record<Difficulty, QuizQuestion>> = {
+    naive_def: {
+        easy: {
+            question: "A bag contains 3 red balls and 2 blue balls. If you draw one ball at random, what is the probability it is red?",
+            options: ["$\\frac{1}{5}$", "$\\frac{2}{5}$", "$\\frac{3}{5}$", "$\\frac{3}{2}$"],
+            correctIndex: 2,
+            explanation: "By the naive definition of probability, $P(A) = \\frac{|A|}{|S|}$ when all outcomes are equally likely. There are 3 red balls out of 5 total balls, so $P(\\text{red}) = \\frac{3}{5}$. The option $\\frac{3}{2}$ is a classic ratio error.",
+        },
+        medium: {
+            question: "If you roll two fair 6-sided dice, what is the probability that the sum of the numbers rolled is exactly 7?",
+            options: ["$\\frac{1}{6}$", "$\\frac{1}{12}$", "$\\frac{5}{36}$", "$\\frac{1}{9}$"],
+            correctIndex: 0,
+            explanation: "There are $6 \\times 6 = 36$ equally likely outcomes when rolling two dice. The outcomes that sum to 7 are (1,6), (2,5), (3,4), (4,3), (5,2), and (6,1) — exactly 6 favorable outcomes. Thus, $P(\\text{sum}=7) = \\frac{6}{36} = \\frac{1}{6}$.",
+        },
+        hard: {
+            question: "A fair coin is tossed 10 times. What is the probability of getting exactly 5 heads?",
+            options: ["$\\frac{63}{256}$", "$\\frac{1}{2}$", "$\\frac{252}{1024}$", "$\\frac{126}{512}$"],
+            correctIndex: 0,
+            explanation: "The sample space has $2^{10} = 1024$ equally likely outcomes. The number of outcomes with exactly 5 heads is given by the combinations formula $\\binom{10}{5} = 252$. The probability is $\\frac{252}{1024}$, which simplifies to $\\frac{63}{256}$.",
+        },
+    },
+    multiplication: {
+        easy: {
+            question: "A restaurant offers a lunch combo with a choice of 3 sandwiches, 2 sides, and 4 drinks. How many unique combinations can you make?",
+            options: ["24", "9", "12", "18"],
+            correctIndex: 0,
+            explanation: "By the multiplication rule, if there are sequential independent choices, the total number of combinations is the product of the number of choices at each stage: $3 \\times 2 \\times 4 = 24$.",
+        },
+        medium: {
+            question: "A standard license plate consists of 3 uppercase letters (A-Z) followed by 3 digits (0-9). If repetition is allowed, how many unique license plates are possible?",
+            options: ["17,576,000", "11,232,000", "$26^3 \\times 10^3$", "$26 \\times 25 \\times 24 \\times 10 \\times 9 \\times 8$"],
+            correctIndex: 0,
+            explanation: "There are 26 choices for each of the 3 letter positions, and 10 choices for each of the 3 digit positions. By the multiplication rule, the total number of unique plates is $26^3 \\times 10^3 = 17,576 \\times 1,000 = 17,576,000$.",
+        },
+        hard: {
+            question: "You are creating a 4-letter password using only letters from the set $\\{a, b, c, d, e, f\\}$. If the password must start with a vowel and end with a consonant, and repetition is allowed, how many passwords can be formed?",
+            options: ["288", "144", "1296", "576"],
+            correctIndex: 0,
+            explanation: "Vowels available are $\\{a, e\\}$ (2 choices). Consonants available are $\\{b, c, d, f\\}$ (4 choices). For the middle two positions, we can choose any of the 6 letters (6 choices each). By the multiplication rule, the total is $2 \\times 6 \\times 6 \\times 4 = 288$.",
+        },
+    },
+    sampling_table: {
+        easy: {
+            question: "In a race with 8 runners, in how many ways can the gold, silver, and bronze medals be awarded?",
+            options: ["336", "56", "512", "120"],
+            correctIndex: 0,
+            explanation: "Since the medals are distinct, order matters. Runners cannot get multiple medals (no replacement). Applying the formula for ordered sampling without replacement: $P(8, 3) = \\frac{8!}{(8-3)!} = 8 \\times 7 \\times 6 = 336$.",
+        },
+        medium: {
+            question: "In how many ways can we choose 3 scoops of ice cream from 5 flavors if order doesn't matter and repetition is allowed?",
+            options: ["35", "10", "60", "125"],
+            correctIndex: 0,
+            explanation: "Since order doesn't matter and repetition is allowed, this is unordered sampling with replacement. Applying the stars and bars formula $\\binom{n+k-1}{k}$ with $n=5$ flavors and $k=3$ scoops gives $\\binom{7}{3} = 35$.",
+        },
+        hard: {
+            question: "A committee of 5 is chosen from a group of 10 people. If 2 specific people refuse to serve together, how many valid committees can be formed?",
+            options: ["196", "252", "112", "140"],
+            correctIndex: 0,
+            explanation: "Total ways to choose 5 from 10 is $\\binom{10}{5} = 252$. The number of bad committees where both specific people serve together is choosing the remaining 3 members from the remaining 8: $\\binom{8}{3} = 56$. Valid committees = $252 - 56 = 196$.",
+        },
+    },
+    story_proofs: {
+        easy: {
+            question: "Which of the following describes the combinatorial story behind the identity $n \\times 2^{n-1} = \\sum_{k=1}^{n} k\\binom{n}{k}$?",
+            options: [
+                "Choosing a committee of any size from $n$ people, with one designated leader.",
+                "Choosing a committee of size $k$ with one designated leader.",
+                "Choosing two disjoint committees from $n$ candidates.",
+                "Arranging $n$ people in a line with a captain."
+            ],
+            correctIndex: 0,
+            explanation: "Both sides count the number of ways to choose a committee of any size from $n$ candidates, with one designated leader. The right side counts by casework on committee size $k$. The left side counts by picking the leader first ($n$ choices), then choosing whether each of the remaining $n-1$ people is on the committee ($2^{n-1}$ choices).",
+        },
+        medium: {
+            question: "Consider the identity $\\sum_{k=0}^{n} \\binom{n}{k}^2 = \\binom{2n}{n}$. What is the standard story proof for this identity (Vandermonde's Identity)?",
+            options: [
+                "Choosing a committee of size $n$ from a group of $n$ men and $n$ women.",
+                "Choosing a committee of size $k$ from $2n$ candidates.",
+                "Arranging $2n$ people in two separate rows.",
+                "Choosing $n$ items with replacement from $n$ options."
+            ],
+            correctIndex: 0,
+            explanation: "The right side is the number of ways to choose $n$ people from $2n$ total candidates (e.g., $n$ men and $n$ women). The left side counts the same by grouping by how many men are chosen ($k$). If we choose $k$ men, we must choose $n-k$ women. The ways to do this is $\\binom{n}{k}\\binom{n}{n-k} = \\binom{n}{k}^2$ by symmetry, summing over all possible $k$.",
+        },
+        hard: {
+            question: "The identity $\\sum_{k=1}^{n} k^2 \\binom{n}{k} = n(n-1)2^{n-2} + n 2^{n-1}$ is proven by counting which of the following?",
+            options: [
+                "Choosing a committee of any size with a president and a vice president (who could be the same person).",
+                "Choosing a committee of size $k$ with a president and a vice president.",
+                "Choosing a committee of any size with two presidents.",
+                "Arranging a committee of size $k$ in a circle."
+            ],
+            correctIndex: 0,
+            explanation: "The identity counts the number of ways to choose a committee of any size from $n$ people, with a president and a vice-president (who could be the same person). Casework on size $k$ gives the left side. The right side partitions into: (1) President ≠ VP: choose President ($n$), choose VP ($n-1$), choose committee members from remaining $n-2$ people ($2^{n-2}$). (2) President = VP: choose that leader ($n$), choose committee members from remaining $n-1$ people ($2^{n-1}$).",
+        },
+    },
+    complement: {
+        easy: {
+            question: "A fair coin is flipped 4 times. What is the probability of getting at least one heads?",
+            options: ["$\\frac{15}{16}$", "$\\frac{1}{16}$", "$\\frac{7}{8}$", "$\\frac{1}{2}$"],
+            correctIndex: 0,
+            explanation: "The complement of 'at least one heads' is 'no heads' (all tails). The probability of all tails is $(\\frac{1}{2})^4 = \\frac{1}{16}$. By complementary counting, $P(\\text{at least one heads}) = 1 - \\frac{1}{16} = \\frac{15}{16}$.",
+        },
+        medium: {
+            question: "A committee of 3 is chosen from 4 men and 4 women. How many committees contain at least one man and at least one woman?",
+            options: ["48", "56", "32", "16"],
+            correctIndex: 0,
+            explanation: "Use complementary counting: subtract all-male and all-female committees from total. Total: $\\binom{8}{3}=56$. All-male: $\\binom{4}{3}=4$. All-female: $\\binom{4}{3}=4$. Mixed: $56 - 4 - 4 = 48$.",
+        },
+        hard: {
+            question: "If you roll 5 fair 6-sided dice, what is the probability that you roll at least one 6?",
+            options: ["$1 - (\\frac{5}{6})^5$", "$(\\frac{1}{6})^5$", "$\\frac{5}{6}$", "$1 - (\\frac{1}{6})^5$"],
+            correctIndex: 0,
+            explanation: "The complement of 'at least one 6' is 'no 6s'. The probability of rolling no 6s on 5 dice is $(\\frac{5}{6})^5$. Thus, by complementary counting, $P(\\text{at least one 6}) = 1 - (\\frac{5}{6})^5$.",
+        },
+    },
+    inclusion_exclusion: {
+        easy: {
+            question: "If $P(A) = 0.6$, $P(B) = 0.4$, and $P(A \\cap B) = 0.2$, what is the union probability $P(A \\cup B)$?",
+            options: ["0.8", "1.0", "0.6", "0.4"],
+            correctIndex: 0,
+            explanation: "By the Principle of Inclusion-Exclusion (PIE): $P(A \\cup B) = P(A) + P(B) - P(A \\cap B) = 0.6 + 0.4 - 0.2 = 0.8$.",
+        },
+        medium: {
+            question: "In a class of 30 students, 18 play soccer, 15 play basketball, and 8 play both. How many students play soccer OR basketball?",
+            options: ["25", "33", "17", "22"],
+            correctIndex: 0,
+            explanation: "Let $S$ be the set of soccer players and $B$ the set of basketball players. By PIE: $|S \\cup B| = |S| + |B| - |S \\cap B| = 18 + 15 - 8 = 25$.",
+        },
+        hard: {
+            question: "How many integers between 1 and 100 (inclusive) are divisible by 2 OR 3 OR 5?",
+            options: ["74", "100", "66", "82"],
+            correctIndex: 0,
+            explanation: "Let $A, B, C$ be integers divisible by 2, 3, 5 respectively. $|A| = 50$, $|B| = 33$, $|C| = 20$. Overlaps: $|A \\cap B| = 16$, $|A \\cap C| = 10$, $|B \\cap C| = 6$. Triple overlap: $|A \\cap B \\cap C| = 3$. By PIE: $50 + 33 + 20 - 16 - 10 - 6 + 3 = 74$.",
+        },
+    },
 };
 
-const fallbackQuizQuestion: QuizQuestion = {
-    question: "In how many ways can we choose 3 scoops of ice cream from 5 flavors if order doesn't matter and repetition is allowed?",
-    options: ['10', '60', '35', '125'],
-    correctIndex: 2,
-    explanation:
-        "Since order doesn't matter and repetition is allowed, this is unordered sampling with replacement. " +
-        "Applying the stars and bars formula: $\\binom{n+k-1}{k}$ with $n=5$ flavors and $k=3$ scoops gives $\\binom{7}{3} = 35$. " +
-        "The other options correspond to the remaining cells of the sampling table: $10 = \\binom{5}{2}$ (unordered, no replacement), " +
-        "$60 = 5 \\times 4 \\times 3$ (ordered, no replacement), and $125 = 5^3$ (ordered, with replacement).",
+export const getTopicCategory = (topic: string): string => {
+    const t = topic.toLowerCase();
+    if (t.includes('naive')) return 'naive_def';
+    if (t.includes('multiplication')) return 'multiplication';
+    if (t.includes('story') || t.includes('proof')) return 'story_proofs';
+    if (t.includes('complement')) return 'complement';
+    if (t.includes('inclusion') || t.includes('exclusion')) return 'inclusion_exclusion';
+    return 'sampling_table'; // Default fallback category (covers sampling table titles)
+};
+
+export const getFallbackQuizQuestion = (topic: string, difficulty: Difficulty): QuizQuestion => {
+    const category = getTopicCategory(topic);
+    const categoryDict = FALLBACK_QUESTIONS[category] || FALLBACK_QUESTIONS.sampling_table;
+    const rawQuestion = categoryDict[difficulty] || categoryDict.medium;
+    return normalizeQuizQuestion(rawQuestion);
 };
 
 export const generateQuizQuestion = async (topic: string, difficulty: Difficulty): Promise<QuizQuestion> => {
+    const settings = getLlmSettings();
     try {
-        if (provider === 'ollama') {
-            return await generateQuizQuestionWithOllama(topic, difficulty);
+        if (settings.provider === 'ollama') {
+            return await generateQuizQuestionWithOllama(topic, difficulty, settings);
         }
 
-        return await generateQuizQuestionWithGemini(topic, difficulty);
+        return await generateQuizQuestionWithGemini(topic, difficulty, settings);
     } catch (error) {
         console.error('Quiz Generation Error:', error);
-        if (difficulty == 'easy') {
-            return fallbackQuizQuestionEasy;
-        }
-        return fallbackQuizQuestion;
+        return getFallbackQuizQuestion(topic, difficulty);
     }
 };
 
 export const getTutorResponse = async (history: ChatHistoryEntry[], currentMessage: string): Promise<string> => {
+    const settings = getLlmSettings();
     try {
-        if (provider === 'ollama') {
-            return await getTutorResponseWithOllama(history, currentMessage);
+        if (settings.provider === 'ollama') {
+            return await getTutorResponseWithOllama(history, currentMessage, settings);
         }
 
-        return await getTutorResponseWithGemini(history, currentMessage);
+        return await getTutorResponseWithGemini(history, currentMessage, settings);
     } catch (error) {
         console.error('Chat Error:', error);
 
-        if (provider === 'ollama') {
+        if (settings.provider === 'ollama') {
             return "I'm having trouble reaching your local Ollama server right now. Make sure Ollama is running and the selected model is available.";
         }
 
-        return "I'm having trouble connecting to Gemini right now. Check your VITE_GEMINI_API_KEY and try again.";
+        return "I'm having trouble connecting to Gemini right now. Check your API key and try again.";
     }
 };
 
-function getProvider(): Provider {
-    const configuredProvider = env.VITE_LLM_PROVIDER?.trim().toLowerCase();
-
-    if (configuredProvider === 'gemini' || configuredProvider === 'ollama') {
-        return configuredProvider;
+function getGeminiClient(apiKey: string): GoogleGenAI {
+    if (!apiKey) {
+        throw new Error('Missing Gemini API key.');
     }
 
-    return env.VITE_GEMINI_API_KEY ? 'gemini' : 'ollama';
+    return new GoogleGenAI({apiKey});
 }
 
-function getGeminiClient(): GoogleGenAI {
-    if (!geminiApiKey) {
-        throw new Error('Missing VITE_GEMINI_API_KEY for Gemini provider.');
-    }
-
-    return new GoogleGenAI({apiKey: geminiApiKey});
-}
-
-async function generateQuizQuestionWithGemini(topic: string, difficulty: Difficulty): Promise<QuizQuestion> {
-    const ai = getGeminiClient();
+async function generateQuizQuestionWithGemini(topic: string, difficulty: Difficulty, settings: LlmSettings): Promise<QuizQuestion> {
+    const ai = getGeminiClient(settings.geminiApiKey);
     const response = await ai.models.generateContent({
-        model: geminiModel,
+        model: settings.geminiModel,
         contents: buildQuizPrompt(topic, difficulty),
         config: {
             responseMimeType: 'application/json',
@@ -179,14 +438,14 @@ async function generateQuizQuestionWithGemini(topic: string, difficulty: Difficu
     return parseQuizQuestion(text);
 }
 
-async function generateQuizQuestionWithOllama(topic: string, difficulty: Difficulty): Promise<QuizQuestion> {
-    const response = await fetch(`${ollamaBaseUrl}/api/generate`, {
+async function generateQuizQuestionWithOllama(topic: string, difficulty: Difficulty, settings: LlmSettings): Promise<QuizQuestion> {
+    const response = await fetch(`${settings.ollamaBaseUrl}/api/generate`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            model: ollamaModel,
+            model: settings.ollamaModel,
             stream: false,
             format: 'json',
             prompt: buildQuizPrompt(topic, difficulty),
@@ -208,12 +467,12 @@ async function generateQuizQuestionWithOllama(topic: string, difficulty: Difficu
     return parseQuizQuestion(data.response);
 }
 
-async function getTutorResponseWithGemini(history: ChatHistoryEntry[], currentMessage: string): Promise<string> {
-    const ai = getGeminiClient();
+async function getTutorResponseWithGemini(history: ChatHistoryEntry[], currentMessage: string, settings: LlmSettings): Promise<string> {
+    const ai = getGeminiClient(settings.geminiApiKey);
     const {priorHistory, nextMessage} = splitHistoryForReply(history, currentMessage);
 
     const chat = ai.chats.create({
-        model: geminiModel,
+        model: settings.geminiModel,
         config: {
             systemInstruction: tutorSystemInstruction,
         },
@@ -227,15 +486,15 @@ async function getTutorResponseWithGemini(history: ChatHistoryEntry[], currentMe
     return result.text || "I'm sorry, I lost my train of thought. Could you ask that again?";
 }
 
-async function getTutorResponseWithOllama(history: ChatHistoryEntry[], currentMessage: string): Promise<string> {
+async function getTutorResponseWithOllama(history: ChatHistoryEntry[], currentMessage: string, settings: LlmSettings): Promise<string> {
     const {fullConversation} = splitHistoryForReply(history, currentMessage);
-    const response = await fetch(`${ollamaBaseUrl}/api/chat`, {
+    const response = await fetch(`${settings.ollamaBaseUrl}/api/chat`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            model: ollamaModel,
+            model: settings.ollamaModel,
             stream: false,
             messages: [
                 {role: 'system', content: tutorSystemInstruction},
@@ -267,11 +526,11 @@ Difficulty: ${difficulty} — ${QUIZ_DIFFICULTY_GUIDE[difficulty]}
 Requirements:
 - The problem must require ${topic} as the primary solving mechanic. Do not let a neighboring topic (e.g. permutations when the topic is combinations) dominate.
 - Use concrete metaphors (e.g. ice cream scoops, passwords, races, committees, poker hands, stars and bars) to frame the question context.
-- Exactly 4 answer options labeled as strings.
+- "explanation" must be a step-by-step solution in 2–5 sentences. It must explicitly state whether order matters and whether replacement is allowed before showing the key formula or counting argument and the final computation. Lead with intuition. Solve the problem completely here first, before choosing the options.
+- Exactly 4 answer options labeled as strings. One option must match the final computed answer from the explanation.
 - Exactly one correct answer. Set "correctIndex" to its 0-based index (vary this — do not always use 0).
 - The 3 wrong options must be plausible: reflect common errors such as confusing ordered vs. unordered selection, off-by-one mistakes, or classic overcounting.
 - Prefer short numeric or simplified-fraction answer choices when the problem asks for a count or probability.
-- "explanation" must be a step-by-step solution in 2–5 sentences. It must explicitly state whether order matters and whether replacement is allowed before showing the key formula or counting argument and the final computation. Lead with intuition.
 
 LaTeX rules (KaTeX):
 - Use $...$ for inline math and $$...$$ for display math only.
@@ -282,9 +541,9 @@ LaTeX rules (KaTeX):
 Return a single valid JSON object with exactly this shape — no markdown fences, no extra keys:
 {
   "question": "string",
+  "explanation": "string",
   "options": ["string", "string", "string", "string"],
-  "correctIndex": 0,
-  "explanation": "string"
+  "correctIndex": 0
 }`;
 }
 
@@ -304,7 +563,9 @@ function splitHistoryForReply(history: ChatHistoryEntry[], currentMessage: strin
 }
 
 function parseQuizQuestion(rawText: string): QuizQuestion {
-    const parsed = JSON.parse(extractJsonObject(rawText)) as Partial<QuizQuestion>;
+    const jsonStr = extractJsonObject(rawText);
+    const escapedJsonStr = escapeRawJsonMathBackslashes(jsonStr);
+    const parsed = JSON.parse(escapedJsonStr) as Partial<QuizQuestion>;
 
     if (typeof parsed.question !== 'string') {
         throw new Error('Quiz response is missing a question string.');

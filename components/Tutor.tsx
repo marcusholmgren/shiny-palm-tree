@@ -19,6 +19,44 @@ const Tutor: React.FC = () => {
         }
     }, [messages, isOpen]);
 
+    useEffect(() => {
+        const handleTutorHint = async (e: Event) => {
+            const customEvent = e as CustomEvent<{ question: string; options: string[]; topic: string }>;
+            if (!customEvent.detail) return;
+
+            const {question, options, topic} = customEvent.detail;
+            setIsOpen(true);
+
+            // Construct user text asking for a hint
+            const hintPrompt = `I'm practicing problems about "${topic}". I'm stuck on this question: "${question}". The choices are: [${options.join(', ')}]. Can you give me a Socratic hint to guide me in the right direction without telling me the answer directly?`;
+
+            // Display a user message in the chat that is readable and natural
+            const userDisplayMessage: ChatMessage = {
+                role: 'user',
+                text: `I'm stuck on this problem: "${question}". Can you give me a hint?`
+            };
+
+            // To prevent double submission/nesting, make sure we aren't already processing
+            setMessages(prev => [...prev, userDisplayMessage]);
+            setLoading(true);
+
+            try {
+                const chatHistoryForCall = messages.concat(userDisplayMessage);
+                const reply = await getTutorResponse(chatHistoryForCall, hintPrompt);
+                setMessages(prev => [...prev, {role: 'model', text: reply}]);
+            } catch (err) {
+                setMessages(prev => [...prev, {role: 'model', text: "I'm having trouble connecting to Dr. B right now. Please try again in a moment."}]);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        window.addEventListener('probality_ask_tutor_hint', handleTutorHint);
+        return () => {
+            window.removeEventListener('probality_ask_tutor_hint', handleTutorHint);
+        };
+    }, [messages]);
+
     const handleSend = async () => {
         if (!input.trim()) return;
 

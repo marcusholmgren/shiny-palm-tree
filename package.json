@@ -10,9 +10,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@google/genai": "^1.30.0",
+    "@google/genai": "^2.6.0",
     "@tailwindcss/vite": "^4.2.4",
-    "katex": "^0.16.45",
+    "katex": "^0.17.0",
     "lucide-react": "^1.11.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

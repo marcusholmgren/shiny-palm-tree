@@ -1,20 +1,24 @@
 import React, {useState} from 'react';
 import {generateQuizQuestion} from '../services/geminiService';
-import {Difficulty, QuizQuestion} from '../types';
+import {Difficulty, QuizQuestion, TopicId} from '../types';
 import {QUIZ_DIFFICULTY_OPTIONS} from '../quizDifficulty';
-import {Brain, CheckCircle, XCircle, Loader2, ArrowRight, LucideBaby, Smile, SmilePlusIcon} from 'lucide-react';
+import {Brain, CheckCircle, XCircle, Loader2, ArrowRight, LucideBaby, Smile, SmilePlusIcon, GraduationCap} from 'lucide-react';
 import MathRenderer from './MathRenderer';
+import {updateStats} from '../services/statsService';
+import Confetti from './Confetti';
 
 interface QuizProps {
-    topic: string;
+    topicId: TopicId;
+    topicTitle: string;
 }
 
-const Quiz: React.FC<QuizProps> = ({topic}) => {
+const Quiz: React.FC<QuizProps> = ({topicId, topicTitle}) => {
     const [question, setQuestion] = useState<QuizQuestion | null>(null);
     const [loading, setLoading] = useState(false);
     const [selectedOption, setSelectedOption] = useState<number | null>(null);
     const [showExplanation, setShowExplanation] = useState(false);
     const [difficulty, setDifficulty] = useState<Difficulty>('medium');
+    const [confettiTrigger, setConfettiTrigger] = useState(0);
 
     const resetQuestionState = () => {
         setShowExplanation(false);
@@ -26,7 +30,7 @@ const Quiz: React.FC<QuizProps> = ({topic}) => {
         setLoading(true);
         resetQuestionState();
 
-        const q = await generateQuizQuestion(topic, difficulty);
+        const q = await generateQuizQuestion(topicTitle, difficulty);
         setQuestion(q);
         setLoading(false);
     };
@@ -39,9 +43,29 @@ const Quiz: React.FC<QuizProps> = ({topic}) => {
     };
 
     const handleSelect = (index: number) => {
-        if (selectedOption !== null) return; // Prevent changing answer
+        if (selectedOption !== null || !question) return; // Prevent changing answer
         setSelectedOption(index);
         setShowExplanation(true);
+
+        const isCorrect = index === question.correctIndex;
+        // Update practice stats database
+        updateStats(topicId, isCorrect);
+
+        if (isCorrect) {
+            setConfettiTrigger((prev) => prev + 1);
+        }
+    };
+
+    const handleAskForHint = () => {
+        if (!question) return;
+
+        window.dispatchEvent(new CustomEvent('probality_ask_tutor_hint', {
+            detail: {
+                question: question.question,
+                options: question.options,
+                topic: topicTitle
+            }
+        }));
     };
 
     const difficultyUi = {
@@ -80,6 +104,7 @@ const Quiz: React.FC<QuizProps> = ({topic}) => {
 
     return (
         <div className="space-y-6">
+            <Confetti trigger={confettiTrigger} />
             <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 {QUIZ_DIFFICULTY_OPTIONS.map((option) => {
                     const ui = difficultyUi[option.value];
@@ -122,7 +147,7 @@ const Quiz: React.FC<QuizProps> = ({topic}) => {
                         </h3>
                         <p className="mt-1 text-sm text-slate-500">
                             {QUIZ_DIFFICULTY_OPTIONS.find((option) => option.value === difficulty)?.label} difficulty
-                            for <strong>{topic}</strong>
+                            for <strong>{topicTitle}</strong>
                         </p>
                     </div>
                     <button
@@ -141,7 +166,7 @@ const Quiz: React.FC<QuizProps> = ({topic}) => {
                         <h3 className="text-xl font-semibold text-slate-800 mb-2">Ready to practice?</h3>
                         <p className="text-slate-500 mb-6 max-w-md">
                             Generate a unique <strong>{difficulty}</strong> problem
-                            about <strong>{topic}</strong> powered by the selected model.
+                            about <strong>{topicTitle}</strong> powered by the selected model.
                         </p>
                         <button
                             onClick={handleLoadQuestion}
@@ -157,8 +182,17 @@ const Quiz: React.FC<QuizProps> = ({topic}) => {
                     </div>
                 ) : question ? (
                     <div className="p-6">
-                        <div className="text-lg text-slate-800 font-medium mb-6 leading-relaxed">
+                        <div className="text-lg text-slate-800 font-medium mb-6 leading-relaxed flex flex-col gap-4">
                             <MathRenderer text={question.question}/>
+                            {selectedOption === null && (
+                                <button
+                                    onClick={handleAskForHint}
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100/80 px-3 py-1.5 rounded-lg transition-all self-start active:scale-[0.97] border border-indigo-100/30"
+                                >
+                                    <GraduationCap className="w-3.5 h-3.5" />
+                                    Ask Dr. B for a Socratic Hint
+                                </button>
+                            )}
                         </div>
 
                         <div className="grid grid-cols-1 gap-3 mb-6">
