@@ -2,6 +2,7 @@ import {GoogleGenAI, Type, Schema} from '@google/genai';
 import {Difficulty, QuizQuestion} from '../types';
 import {QUIZ_DIFFICULTY_GUIDE} from '../quizDifficulty';
 import {normalizeQuizQuestion, escapeRawJsonMathBackslashes} from './llmFormatting';
+import {FALLBACK_QUESTIONS} from './fallbackQuestions';
 
 type Provider = 'gemini' | 'ollama';
 type AppEnv = Record<string, string | undefined>;
@@ -222,144 +223,6 @@ const quizSchema: Schema = {
     required: ['question', 'explanation', 'options', 'correctIndex'],
 };
 
-const FALLBACK_QUESTIONS: Record<string, Record<Difficulty, QuizQuestion>> = {
-    naive_def: {
-        easy: {
-            question: "A bag contains 3 red balls and 2 blue balls. If you draw one ball at random, what is the probability it is red?",
-            options: ["$\\frac{1}{5}$", "$\\frac{2}{5}$", "$\\frac{3}{5}$", "$\\frac{3}{2}$"],
-            correctIndex: 2,
-            explanation: "By the naive definition of probability, $P(A) = \\frac{|A|}{|S|}$ when all outcomes are equally likely. There are 3 red balls out of 5 total balls, so $P(\\text{red}) = \\frac{3}{5}$. The option $\\frac{3}{2}$ is a classic ratio error.",
-        },
-        medium: {
-            question: "If you roll two fair 6-sided dice, what is the probability that the sum of the numbers rolled is exactly 7?",
-            options: ["$\\frac{1}{6}$", "$\\frac{1}{12}$", "$\\frac{5}{36}$", "$\\frac{1}{9}$"],
-            correctIndex: 0,
-            explanation: "There are $6 \\times 6 = 36$ equally likely outcomes when rolling two dice. The outcomes that sum to 7 are (1,6), (2,5), (3,4), (4,3), (5,2), and (6,1) — exactly 6 favorable outcomes. Thus, $P(\\text{sum}=7) = \\frac{6}{36} = \\frac{1}{6}$.",
-        },
-        hard: {
-            question: "A fair coin is tossed 10 times. What is the probability of getting exactly 5 heads?",
-            options: ["$\\frac{63}{256}$", "$\\frac{1}{2}$", "$\\frac{252}{1024}$", "$\\frac{126}{512}$"],
-            correctIndex: 0,
-            explanation: "The sample space has $2^{10} = 1024$ equally likely outcomes. The number of outcomes with exactly 5 heads is given by the combinations formula $\\binom{10}{5} = 252$. The probability is $\\frac{252}{1024}$, which simplifies to $\\frac{63}{256}$.",
-        },
-    },
-    multiplication: {
-        easy: {
-            question: "A restaurant offers a lunch combo with a choice of 3 sandwiches, 2 sides, and 4 drinks. How many unique combinations can you make?",
-            options: ["24", "9", "12", "18"],
-            correctIndex: 0,
-            explanation: "By the multiplication rule, if there are sequential independent choices, the total number of combinations is the product of the number of choices at each stage: $3 \\times 2 \\times 4 = 24$.",
-        },
-        medium: {
-            question: "A standard license plate consists of 3 uppercase letters (A-Z) followed by 3 digits (0-9). If repetition is allowed, how many unique license plates are possible?",
-            options: ["17,576,000", "11,232,000", "$26^3 \\times 10^3$", "$26 \\times 25 \\times 24 \\times 10 \\times 9 \\times 8$"],
-            correctIndex: 0,
-            explanation: "There are 26 choices for each of the 3 letter positions, and 10 choices for each of the 3 digit positions. By the multiplication rule, the total number of unique plates is $26^3 \\times 10^3 = 17,576 \\times 1,000 = 17,576,000$.",
-        },
-        hard: {
-            question: "You are creating a 4-letter password using only letters from the set $\\{a, b, c, d, e, f\\}$. If the password must start with a vowel and end with a consonant, and repetition is allowed, how many passwords can be formed?",
-            options: ["288", "144", "1296", "576"],
-            correctIndex: 0,
-            explanation: "Vowels available are $\\{a, e\\}$ (2 choices). Consonants available are $\\{b, c, d, f\\}$ (4 choices). For the middle two positions, we can choose any of the 6 letters (6 choices each). By the multiplication rule, the total is $2 \\times 6 \\times 6 \\times 4 = 288$.",
-        },
-    },
-    sampling_table: {
-        easy: {
-            question: "In a race with 8 runners, in how many ways can the gold, silver, and bronze medals be awarded?",
-            options: ["336", "56", "512", "120"],
-            correctIndex: 0,
-            explanation: "Since the medals are distinct, order matters. Runners cannot get multiple medals (no replacement). Applying the formula for ordered sampling without replacement: $P(8, 3) = \\frac{8!}{(8-3)!} = 8 \\times 7 \\times 6 = 336$.",
-        },
-        medium: {
-            question: "In how many ways can we choose 3 scoops of ice cream from 5 flavors if order doesn't matter and repetition is allowed?",
-            options: ["35", "10", "60", "125"],
-            correctIndex: 0,
-            explanation: "Since order doesn't matter and repetition is allowed, this is unordered sampling with replacement. Applying the stars and bars formula $\\binom{n+k-1}{k}$ with $n=5$ flavors and $k=3$ scoops gives $\\binom{7}{3} = 35$.",
-        },
-        hard: {
-            question: "A committee of 5 is chosen from a group of 10 people. If 2 specific people refuse to serve together, how many valid committees can be formed?",
-            options: ["196", "252", "112", "140"],
-            correctIndex: 0,
-            explanation: "Total ways to choose 5 from 10 is $\\binom{10}{5} = 252$. The number of bad committees where both specific people serve together is choosing the remaining 3 members from the remaining 8: $\\binom{8}{3} = 56$. Valid committees = $252 - 56 = 196$.",
-        },
-    },
-    story_proofs: {
-        easy: {
-            question: "Which of the following describes the combinatorial story behind the identity $n \\times 2^{n-1} = \\sum_{k=1}^{n} k\\binom{n}{k}$?",
-            options: [
-                "Choosing a committee of any size from $n$ people, with one designated leader.",
-                "Choosing a committee of size $k$ with one designated leader.",
-                "Choosing two disjoint committees from $n$ candidates.",
-                "Arranging $n$ people in a line with a captain."
-            ],
-            correctIndex: 0,
-            explanation: "Both sides count the number of ways to choose a committee of any size from $n$ candidates, with one designated leader. The right side counts by casework on committee size $k$. The left side counts by picking the leader first ($n$ choices), then choosing whether each of the remaining $n-1$ people is on the committee ($2^{n-1}$ choices).",
-        },
-        medium: {
-            question: "Consider the identity $\\sum_{k=0}^{n} \\binom{n}{k}^2 = \\binom{2n}{n}$. What is the standard story proof for this identity (Vandermonde's Identity)?",
-            options: [
-                "Choosing a committee of size $n$ from a group of $n$ men and $n$ women.",
-                "Choosing a committee of size $k$ from $2n$ candidates.",
-                "Arranging $2n$ people in two separate rows.",
-                "Choosing $n$ items with replacement from $n$ options."
-            ],
-            correctIndex: 0,
-            explanation: "The right side is the number of ways to choose $n$ people from $2n$ total candidates (e.g., $n$ men and $n$ women). The left side counts the same by grouping by how many men are chosen ($k$). If we choose $k$ men, we must choose $n-k$ women. The ways to do this is $\\binom{n}{k}\\binom{n}{n-k} = \\binom{n}{k}^2$ by symmetry, summing over all possible $k$.",
-        },
-        hard: {
-            question: "The identity $\\sum_{k=1}^{n} k^2 \\binom{n}{k} = n(n-1)2^{n-2} + n 2^{n-1}$ is proven by counting which of the following?",
-            options: [
-                "Choosing a committee of any size with a president and a vice president (who could be the same person).",
-                "Choosing a committee of size $k$ with a president and a vice president.",
-                "Choosing a committee of any size with two presidents.",
-                "Arranging a committee of size $k$ in a circle."
-            ],
-            correctIndex: 0,
-            explanation: "The identity counts the number of ways to choose a committee of any size from $n$ people, with a president and a vice-president (who could be the same person). Casework on size $k$ gives the left side. The right side partitions into: (1) President ≠ VP: choose President ($n$), choose VP ($n-1$), choose committee members from remaining $n-2$ people ($2^{n-2}$). (2) President = VP: choose that leader ($n$), choose committee members from remaining $n-1$ people ($2^{n-1}$).",
-        },
-    },
-    complement: {
-        easy: {
-            question: "A fair coin is flipped 4 times. What is the probability of getting at least one heads?",
-            options: ["$\\frac{15}{16}$", "$\\frac{1}{16}$", "$\\frac{7}{8}$", "$\\frac{1}{2}$"],
-            correctIndex: 0,
-            explanation: "The complement of 'at least one heads' is 'no heads' (all tails). The probability of all tails is $(\\frac{1}{2})^4 = \\frac{1}{16}$. By complementary counting, $P(\\text{at least one heads}) = 1 - \\frac{1}{16} = \\frac{15}{16}$.",
-        },
-        medium: {
-            question: "A committee of 3 is chosen from 4 men and 4 women. How many committees contain at least one man and at least one woman?",
-            options: ["48", "56", "32", "16"],
-            correctIndex: 0,
-            explanation: "Use complementary counting: subtract all-male and all-female committees from total. Total: $\\binom{8}{3}=56$. All-male: $\\binom{4}{3}=4$. All-female: $\\binom{4}{3}=4$. Mixed: $56 - 4 - 4 = 48$.",
-        },
-        hard: {
-            question: "If you roll 5 fair 6-sided dice, what is the probability that you roll at least one 6?",
-            options: ["$1 - (\\frac{5}{6})^5$", "$(\\frac{1}{6})^5$", "$\\frac{5}{6}$", "$1 - (\\frac{1}{6})^5$"],
-            correctIndex: 0,
-            explanation: "The complement of 'at least one 6' is 'no 6s'. The probability of rolling no 6s on 5 dice is $(\\frac{5}{6})^5$. Thus, by complementary counting, $P(\\text{at least one 6}) = 1 - (\\frac{5}{6})^5$.",
-        },
-    },
-    inclusion_exclusion: {
-        easy: {
-            question: "If $P(A) = 0.6$, $P(B) = 0.4$, and $P(A \\cap B) = 0.2$, what is the union probability $P(A \\cup B)$?",
-            options: ["0.8", "1.0", "0.6", "0.4"],
-            correctIndex: 0,
-            explanation: "By the Principle of Inclusion-Exclusion (PIE): $P(A \\cup B) = P(A) + P(B) - P(A \\cap B) = 0.6 + 0.4 - 0.2 = 0.8$.",
-        },
-        medium: {
-            question: "In a class of 30 students, 18 play soccer, 15 play basketball, and 8 play both. How many students play soccer OR basketball?",
-            options: ["25", "33", "17", "22"],
-            correctIndex: 0,
-            explanation: "Let $S$ be the set of soccer players and $B$ the set of basketball players. By PIE: $|S \\cup B| = |S| + |B| - |S \\cap B| = 18 + 15 - 8 = 25$.",
-        },
-        hard: {
-            question: "How many integers between 1 and 100 (inclusive) are divisible by 2 OR 3 OR 5?",
-            options: ["74", "100", "66", "82"],
-            correctIndex: 0,
-            explanation: "Let $A, B, C$ be integers divisible by 2, 3, 5 respectively. $|A| = 50$, $|B| = 33$, $|C| = 20$. Overlaps: $|A \\cap B| = 16$, $|A \\cap C| = 10$, $|B \\cap C| = 6$. Triple overlap: $|A \\cap B \\cap C| = 3$. By PIE: $50 + 33 + 20 - 16 - 10 - 6 + 3 = 74$.",
-        },
-    },
-};
-
 export const getTopicCategory = (topic: string): string => {
     const t = topic.toLowerCase();
     if (t.includes('naive')) return 'naive_def';
@@ -370,10 +233,23 @@ export const getTopicCategory = (topic: string): string => {
     return 'sampling_table'; // Default fallback category (covers sampling table titles)
 };
 
+
+// Keep track of which question we're on for each category and difficulty
+const fallbackIndices: Record<string, number> = {};
+
 export const getFallbackQuizQuestion = (topic: string, difficulty: Difficulty): QuizQuestion => {
     const category = getTopicCategory(topic);
     const categoryDict = FALLBACK_QUESTIONS[category] || FALLBACK_QUESTIONS.sampling_table;
-    const rawQuestion = categoryDict[difficulty] || categoryDict.medium;
+    const questionsList = categoryDict[difficulty] || categoryDict.medium;
+
+    const indexKey = `${category}_${difficulty}`;
+    if (fallbackIndices[indexKey] === undefined) {
+        fallbackIndices[indexKey] = 0;
+    }
+
+    const rawQuestion = questionsList[fallbackIndices[indexKey] % questionsList.length];
+    fallbackIndices[indexKey]++;
+
     return normalizeQuizQuestion(rawQuestion);
 };
 
