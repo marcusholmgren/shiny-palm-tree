@@ -1,7 +1,7 @@
 import {GoogleGenAI, Type, Schema} from '@google/genai';
 import {Difficulty, QuizQuestion} from '../types';
 import {QUIZ_DIFFICULTY_GUIDE} from '../quizDifficulty';
-import {normalizeQuizQuestion} from './llmFormatting';
+import {normalizeQuizQuestion, escapeRawJsonMathBackslashes} from './llmFormatting';
 
 type Provider = 'gemini' | 'ollama';
 type AppEnv = Record<string, string | undefined>;
@@ -211,15 +211,15 @@ const quizSchema: Schema = {
     type: Type.OBJECT,
     properties: {
         question: {type: Type.STRING, description: 'The probability problem text.'},
+        explanation: {type: Type.STRING, description: 'A detailed explanation of the solution. Solve the problem completely here first before writing options or correctIndex.'},
         options: {
             type: Type.ARRAY,
             items: {type: Type.STRING},
             description: 'Exactly four possible answers.',
         },
         correctIndex: {type: Type.INTEGER, description: 'The index (0-3) of the correct answer.'},
-        explanation: {type: Type.STRING, description: 'A detailed explanation of the solution.'},
     },
-    required: ['question', 'options', 'correctIndex', 'explanation'],
+    required: ['question', 'explanation', 'options', 'correctIndex'],
 };
 
 const fallbackQuizQuestionEasy: QuizQuestion = {
@@ -409,11 +409,11 @@ Difficulty: ${difficulty} — ${QUIZ_DIFFICULTY_GUIDE[difficulty]}
 Requirements:
 - The problem must require ${topic} as the primary solving mechanic. Do not let a neighboring topic (e.g. permutations when the topic is combinations) dominate.
 - Use concrete metaphors (e.g. ice cream scoops, passwords, races, committees, poker hands, stars and bars) to frame the question context.
-- Exactly 4 answer options labeled as strings.
+- "explanation" must be a step-by-step solution in 2–5 sentences. It must explicitly state whether order matters and whether replacement is allowed before showing the key formula or counting argument and the final computation. Lead with intuition. Solve the problem completely here first, before choosing the options.
+- Exactly 4 answer options labeled as strings. One option must match the final computed answer from the explanation.
 - Exactly one correct answer. Set "correctIndex" to its 0-based index (vary this — do not always use 0).
 - The 3 wrong options must be plausible: reflect common errors such as confusing ordered vs. unordered selection, off-by-one mistakes, or classic overcounting.
 - Prefer short numeric or simplified-fraction answer choices when the problem asks for a count or probability.
-- "explanation" must be a step-by-step solution in 2–5 sentences. It must explicitly state whether order matters and whether replacement is allowed before showing the key formula or counting argument and the final computation. Lead with intuition.
 
 LaTeX rules (KaTeX):
 - Use $...$ for inline math and $$...$$ for display math only.
@@ -424,9 +424,9 @@ LaTeX rules (KaTeX):
 Return a single valid JSON object with exactly this shape — no markdown fences, no extra keys:
 {
   "question": "string",
+  "explanation": "string",
   "options": ["string", "string", "string", "string"],
-  "correctIndex": 0,
-  "explanation": "string"
+  "correctIndex": 0
 }`;
 }
 
@@ -446,7 +446,9 @@ function splitHistoryForReply(history: ChatHistoryEntry[], currentMessage: strin
 }
 
 function parseQuizQuestion(rawText: string): QuizQuestion {
-    const parsed = JSON.parse(extractJsonObject(rawText)) as Partial<QuizQuestion>;
+    const jsonStr = extractJsonObject(rawText);
+    const escapedJsonStr = escapeRawJsonMathBackslashes(jsonStr);
+    const parsed = JSON.parse(escapedJsonStr) as Partial<QuizQuestion>;
 
     if (typeof parsed.question !== 'string') {
         throw new Error('Quiz response is missing a question string.');

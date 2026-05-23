@@ -2,7 +2,7 @@ import {QuizQuestion} from '../types';
 
 const MATH_TEXT_SPLIT_PATTERN = /(\$\$[\s\S]+?\$\$|\$[^$]+?\$)/;
 const BARE_INLINE_LATEX_FRAGMENT_PATTERN =
-    /\\[a-zA-Z]+(?:\{[^{}]*\})*(?:\s*(?:\\[a-zA-Z]+(?:\{[^{}]*\})*|[0-9]+(?:\.[0-9]+)?(?:\/[0-9]+(?:\.[0-9]+)?)?|[A-Za-z]{1,2}|[=+\-*/^_(),{}]))+\$?/g;
+    /\\[a-zA-Z]+(?:\{[^{}]*\})*(?:\s*(?:\\[a-zA-Z]+(?:\{[^{}]*\})*|[0-9]+(?:\.[0-9]+)?(?:\/[0-9]+(?:\.[0-9]+)?)?|[A-Za-z]{1,2}|[=+\-*/^_(),{}!|<>\[\]]))+\$?/g;
 
 const isDelimitedMathSegment = (segment: string): boolean => {
     return (
@@ -30,7 +30,13 @@ const wrapBareInlineLatexFragments = (text: string): string => {
 };
 
 export const normalizeMathText = (text: string): string => {
-    const normalized = text
+    // Collapse double backslashes before common LaTeX math commands
+    const collapsed = text.replace(
+        /\\\\(times|frac|binom|cdot|cdots|ldots|cup|cap|le|ge|ne|neq|approx|infty|theta|pi|sigma|mu|alpha|beta|gamma|lambda|delta|sum|prod|int|text|choose|sim|bar|setminus|subset|over)\b/g,
+        '\\$1'
+    );
+
+    const normalized = collapsed
         .replace(/\r\n/g, '\n')
         .replace(/\\\[/g, () => '$$')
         .replace(/\\\]/g, () => '$$')
@@ -70,11 +76,30 @@ export const normalizeMathOption = (text: string): string => {
     return normalized;
 };
 
+const SELF_CORRECTION_PATTERN =
+    /(?:\(|^|\s)(?:wait,\s+)?(?:this\s+is\s+incorrect|that's\s+not\s+right|self-correction|\*?re-evaluation|\*?final\s+(?:attempt|adjustment)|(?:re-)?writing\s+the\s+prompt|\*?new\s+question:|\*?alternative\s+check)\b/i;
+
+export const cleanExplanationText = (text: string): string => {
+    const matchIndex = text.search(SELF_CORRECTION_PATTERN);
+    if (matchIndex >= 0) {
+        return text.slice(0, matchIndex).trim();
+    }
+    return text.trim();
+};
+
+const MATH_COMMANDS_PATTERN =
+    /(?<!\\)\\(times|frac|binom|cdot|cdots|ldots|cup|cap|le|ge|ne|neq|approx|infty|theta|pi|sigma|mu|alpha|beta|gamma|lambda|delta|sum|prod|int|text|choose|sim|bar|setminus|subset|over)\b/g;
+
+export const escapeRawJsonMathBackslashes = (jsonStr: string): string => {
+    // Double-escape any unescaped backslash that is part of a LaTeX command
+    return jsonStr.replace(MATH_COMMANDS_PATTERN, '\\\\$1');
+};
+
 export const normalizeQuizQuestion = (question: QuizQuestion): QuizQuestion => {
     return {
         ...question,
         question: normalizeMathText(question.question),
         options: question.options.map(normalizeMathOption),
-        explanation: normalizeMathText(question.explanation),
+        explanation: normalizeMathText(cleanExplanationText(question.explanation)),
     };
 };
