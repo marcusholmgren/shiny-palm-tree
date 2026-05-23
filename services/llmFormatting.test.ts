@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {cleanExplanationText, escapeRawJsonMathBackslashes, normalizeMathOption, normalizeMathText, normalizeQuizQuestion} from './llmFormatting';
+import {getTopicCategory, getFallbackQuizQuestion} from './geminiService';
 
 describe('normalizeMathText', () => {
     it('keeps standard dollar-delimited LaTeX unchanged', () => {
@@ -131,5 +132,63 @@ describe('escapeRawJsonMathBackslashes', () => {
         expect(escapeRawJsonMathBackslashes(rawJson)).toBe(
             '{"text": "Line 1\\nLine 2\\tTabbed", "unicode": "\\u0020Space"}'
         );
+    });
+});
+
+describe('getTopicCategory', () => {
+    it('correctly maps naive definition topics', () => {
+        expect(getTopicCategory('Naive Definition')).toBe('naive_def');
+        expect(getTopicCategory('naive probability')).toBe('naive_def');
+    });
+
+    it('correctly maps multiplication rule topics', () => {
+        expect(getTopicCategory('Multiplication Rule')).toBe('multiplication');
+        expect(getTopicCategory('multiplication rule of counting')).toBe('multiplication');
+    });
+
+    it('correctly maps story proofs topics', () => {
+        expect(getTopicCategory('Story Proofs')).toBe('story_proofs');
+        expect(getTopicCategory('combinatorial proof')).toBe('story_proofs');
+    });
+
+    it('correctly maps complement counting topics', () => {
+        expect(getTopicCategory('Complement Counting')).toBe('complement');
+        expect(getTopicCategory('counting by complement')).toBe('complement');
+    });
+
+    it('correctly maps inclusion-exclusion topics', () => {
+        expect(getTopicCategory('Inclusion-Exclusion')).toBe('inclusion_exclusion');
+        expect(getTopicCategory('inclusion exclusion principle')).toBe('inclusion_exclusion');
+    });
+
+    it('defaults to sampling table for other/dynamic topics', () => {
+        expect(getTopicCategory('Ordered without replacement (Race rankings)')).toBe('sampling_table');
+        expect(getTopicCategory('Unordered with replacement (Stars and Bars)')).toBe('sampling_table');
+        expect(getTopicCategory('Something completely random')).toBe('sampling_table');
+    });
+});
+
+describe('getFallbackQuizQuestion', () => {
+    it('returns a valid normalized quiz question for a matched topic and difficulty', () => {
+        const question = getFallbackQuizQuestion('Naive Definition', 'easy');
+        expect(question.question).toBe('A bag contains 3 red balls and 2 blue balls. If you draw one ball at random, what is the probability it is red?');
+        expect(question.options).toEqual(['$\\frac{1}{5}$', '$\\frac{2}{5}$', '$\\frac{3}{5}$', '$\\frac{3}{2}$']);
+        expect(question.correctIndex).toBe(2);
+        expect(question.explanation).toContain('By the naive definition of probability, $P(A) = \\frac{|A|}{|S|}$');
+    });
+
+    it('falls back to sampling table if topic is unrecognized', () => {
+        const question = getFallbackQuizQuestion('Some random topic', 'medium');
+        // 'sampling_table' medium is stars and bars scoop choosing
+        expect(question.question).toContain('scoops of ice cream');
+        expect(question.options).toEqual(['35', '10', '60', '125']);
+        expect(question.correctIndex).toBe(0);
+    });
+
+    it('falls back to medium difficulty if invalid difficulty is somehow provided', () => {
+        // Cast to any to simulate invalid difficulty at runtime
+        const question = getFallbackQuizQuestion('Multiplication Rule', 'invalid-difficulty' as any);
+        expect(question.question).toContain('license plate');
+        expect(question.correctIndex).toBe(0);
     });
 });

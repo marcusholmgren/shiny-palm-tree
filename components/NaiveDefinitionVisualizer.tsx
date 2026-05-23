@@ -143,8 +143,7 @@ const NaiveDefinitionVisualizer: React.FC = () => {
                     </div>
                     
                     <div className="mt-4 text-xs font-semibold text-slate-500 flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 bg-slate-300 rounded-full border border-slate-400" />
-                        Sample Space <MathRenderer text={`$|S| = ${totalCount}$`} />
+                        Ω Sample Space <MathRenderer text={`$|S| = ${totalCount}$`} />
                     </div>
                 </div>
 
