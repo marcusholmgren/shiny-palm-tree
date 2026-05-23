@@ -1,10 +1,12 @@
-import React, {useState} from 'react';
+import React, {useState, useEffect} from 'react';
 import SamplingTable, {getSamplingSelection, SamplingSelection} from './components/SamplingTable';
 import Quiz from './components/Quiz';
 import Tutor from './components/Tutor';
 import MathRenderer from './components/MathRenderer';
+import LlmSettingsPanel from './components/LlmSettingsPanel';
+import {getLlmSettings, LlmSettings} from './services/geminiService';
 import {SamplingMode, TopicId, Topic} from './types';
-import {BookOpen, Calculator, ChevronRight, Layout, Sigma} from 'lucide-react';
+import {BookOpen, Calculator, ChevronRight, Layout, Sigma, Settings} from 'lucide-react';
 
 const topics: Topic[] = [
     {
@@ -50,6 +52,23 @@ const App: React.FC = () => {
     const [samplingSelection, setSamplingSelection] = useState<SamplingSelection>(
         getSamplingSelection(SamplingMode.ORDERED_WITH_REPLACEMENT),
     );
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [llmSettings, setLlmSettings] = useState<LlmSettings>(getLlmSettings());
+
+    useEffect(() => {
+        const handleSettingsChange = (e: Event) => {
+            const customEvent = e as CustomEvent<LlmSettings>;
+            if (customEvent.detail) {
+                setLlmSettings(customEvent.detail);
+            } else {
+                setLlmSettings(getLlmSettings());
+            }
+        };
+        window.addEventListener('probality_llm_settings_changed', handleSettingsChange);
+        return () => {
+            window.removeEventListener('probality_llm_settings_changed', handleSettingsChange);
+        };
+    }, []);
 
     const renderContent = () => {
         if (currentTopic.id === TopicId.SAMPLING_TABLE) {
@@ -119,43 +138,70 @@ const App: React.FC = () => {
         <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans">
             {/* Sidebar Navigation */}
             <aside
-                className="w-full md:w-64 bg-white border-r border-slate-200 md:h-screen sticky top-0 flex-shrink-0 overflow-y-auto">
-                <div className="p-6 border-b border-slate-100">
-                    <div className="flex items-center gap-2 text-indigo-600 font-bold text-xl">
-                        <Layout className="w-6 h-6"/>
-                        <span>Probability</span>
+                className="w-full md:w-64 bg-white border-r border-slate-200 md:h-screen sticky top-0 flex-shrink-0 overflow-y-auto flex flex-col justify-between">
+                <div className="flex flex-col">
+                    <div className="p-6 border-b border-slate-100">
+                        <div className="flex items-center gap-2 text-indigo-600 font-bold text-xl">
+                            <Layout className="w-6 h-6"/>
+                            <span>Probability</span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">Interactive Counting</p>
                     </div>
-                    <p className="text-xs text-slate-400 mt-1">Interactive Counting</p>
+
+                    <nav className="p-4 space-y-1">
+                        {topics.map(topic => (
+                            <button
+                                key={topic.id}
+                                onClick={() => setCurrentTopic(topic)}
+                                className={`w-full flex items-center justify-between p-3 rounded-lg text-sm font-medium transition-all ${
+                                    currentTopic.id === topic.id
+                                        ? 'bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-200'
+                                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                }`}
+                            >
+                                <div className="flex items-center gap-3">
+                                    {topic.id === TopicId.SAMPLING_TABLE ? <Calculator className="w-4 h-4"/> :
+                                        <BookOpen className="w-4 h-4"/>}
+                                    {topic.title}
+                                </div>
+                                {currentTopic.id === topic.id && <ChevronRight className="w-4 h-4 opacity-50"/>}
+                            </button>
+                        ))}
+                    </nav>
                 </div>
 
-                <nav className="p-4 space-y-1">
-                    {topics.map(topic => (
-                        <button
-                            key={topic.id}
-                            onClick={() => setCurrentTopic(topic)}
-                            className={`w-full flex items-center justify-between p-3 rounded-lg text-sm font-medium transition-all ${
-                                currentTopic.id === topic.id
-                                    ? 'bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-200'
-                                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                            }`}
-                        >
-                            <div className="flex items-center gap-3">
-                                {topic.id === TopicId.SAMPLING_TABLE ? <Calculator className="w-4 h-4"/> :
-                                    <BookOpen className="w-4 h-4"/>}
-                                {topic.title}
-                            </div>
-                            {currentTopic.id === topic.id && <ChevronRight className="w-4 h-4 opacity-50"/>}
-                        </button>
-                    ))}
-                </nav>
-
-                <div className="p-6 mt-auto">
-                    <div className="bg-slate-900 rounded-xl p-4 text-center">
-                        <p className="text-slate-400 text-xs mb-2">Powered by</p>
-                        <div className="text-white font-bold flex items-center justify-center gap-1">
-                            <span>Google Gemini</span>
+                {/* Footer Dynamic Branding & Settings Panel Toggle */}
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-2 mt-auto">
+                    <div className="flex items-center gap-2">
+                        {llmSettings.provider === 'gemini' ? (
+                            <svg className="w-5 h-5 text-indigo-600 shrink-0 animate-[pulse_2s_infinite]" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 2a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 12 2zm0 13.5a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zm6.5-6.5a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zM5.5 8.75a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75z" opacity="0.3" />
+                                <path d="M11.5 3C11.5 3 11.5 9.5 5 9.5C11.5 9.5 11.5 16 11.5 16C11.5 16 11.5 9.5 18 9.5C11.5 9.5 11.5 3 11.5 3Z" />
+                                <path d="M18.5 14C18.5 14 18.5 17.5 15 17.5C18.5 17.5 18.5 21 18.5 21C18.5 21 18.5 17.5 22 17.5C18.5 17.5 18.5 14 18.5 14Z" />
+                            </svg>
+                        ) : (
+                            <svg className="w-5 h-5 text-emerald-600 shrink-0 animate-[pulse_2s_infinite]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="11" width="18" height="10" rx="2" />
+                                <path d="M12 2v6" />
+                                <path d="M8 5h8" />
+                                <circle cx="12" cy="16" r="2" />
+                            </svg>
+                        )}
+                        <div className="text-left">
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Engine</p>
+                            <p className="text-xs font-bold text-slate-700 leading-tight">
+                                {llmSettings.provider === 'gemini' ? 'Google Gemini' : 'Gemma (Ollama)'}
+                            </p>
                         </div>
                     </div>
+                    
+                    <button
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-all active:scale-95"
+                        title="Configure settings"
+                    >
+                        <Settings className="w-4 h-4" />
+                    </button>
                 </div>
             </aside>
 
@@ -173,6 +219,9 @@ const App: React.FC = () => {
 
             {/* AI Tutor Chat Overlay */}
             <Tutor/>
+
+            {/* LLM Dynamic Configuration Dialog */}
+            <LlmSettingsPanel isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
         </div>
     );
 };

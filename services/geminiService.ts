@@ -42,13 +42,148 @@ export interface OllamaChatResponseMessage {
     thinking: string;
 }
 
-const env = ((import.meta as ImportMeta & { env?: AppEnv }).env ?? {});
+const getEnv = (): AppEnv => {
+    const metaEnv = ((import.meta as ImportMeta & { env?: AppEnv }).env ?? {});
+    const processEnv = typeof process !== 'undefined' ? (process.env as AppEnv) : {};
+    return {
+        ...metaEnv,
+        ...processEnv
+    };
+};
 
-const provider = getProvider();
-const geminiApiKey = env.VITE_GEMINI_API_KEY ?? '';
-const geminiModel = env.VITE_GEMINI_MODEL ?? 'gemini-3.1-flash-lite-preview';
-const ollamaBaseUrl = env.VITE_OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434';
-const ollamaModel = env.VITE_OLLAMA_MODEL ?? 'gemma4:latest';
+export interface LlmSettings {
+    provider: 'gemini' | 'ollama';
+    geminiApiKey: string;
+    geminiModel: string;
+    ollamaBaseUrl: string;
+    ollamaModel: string;
+}
+
+export const getLlmSettings = (): LlmSettings => {
+    const currentEnv = getEnv();
+    const storedProvider = localStorage.getItem('probality_llm_provider') as 'gemini' | 'ollama' | null;
+    
+    // API Key resolution helper
+    const getResolvedApiKey = () => {
+        const sessionApiKey = sessionStorage.getItem('probality_gemini_api_key');
+        if (sessionApiKey !== null) {
+            return sessionApiKey;
+        }
+        const rawApiKey = currentEnv.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : '') || '';
+        return rawApiKey === 'PLACEHOLDER_API_KEY' ? '' : rawApiKey;
+    };
+
+    const resolvedApiKey = getResolvedApiKey();
+
+    let resolvedProvider: 'gemini' | 'ollama';
+    if (storedProvider === 'gemini' || storedProvider === 'ollama') {
+        resolvedProvider = storedProvider;
+    } else {
+        const envProvider = currentEnv.VITE_LLM_PROVIDER?.trim().toLowerCase();
+        if (envProvider === 'gemini' || envProvider === 'ollama') {
+            resolvedProvider = envProvider;
+        } else {
+            resolvedProvider = resolvedApiKey ? 'gemini' : 'ollama';
+        }
+    }
+
+    const storedGeminiModel = localStorage.getItem('probality_gemini_model');
+    const resolvedGeminiModel = storedGeminiModel || currentEnv.VITE_GEMINI_MODEL || 'gemini-3.1-flash-lite-preview';
+
+    const storedOllamaBaseUrl = localStorage.getItem('probality_ollama_base_url');
+    const resolvedOllamaBaseUrl = storedOllamaBaseUrl || currentEnv.VITE_OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+
+    const storedOllamaModel = localStorage.getItem('probality_ollama_model');
+    const resolvedOllamaModel = storedOllamaModel || currentEnv.VITE_OLLAMA_MODEL || 'gemma4:latest';
+
+    return {
+        provider: resolvedProvider,
+        geminiApiKey: resolvedApiKey,
+        geminiModel: resolvedGeminiModel,
+        ollamaBaseUrl: resolvedOllamaBaseUrl,
+        ollamaModel: resolvedOllamaModel,
+    };
+};
+
+export const updateLlmSettings = (updates: Partial<LlmSettings>): LlmSettings => {
+    if (updates.provider) {
+        localStorage.setItem('probality_llm_provider', updates.provider);
+    }
+    if (updates.geminiApiKey !== undefined) {
+        sessionStorage.setItem('probality_gemini_api_key', updates.geminiApiKey);
+    }
+    if (updates.geminiModel) {
+        localStorage.setItem('probality_gemini_model', updates.geminiModel);
+    }
+    if (updates.ollamaBaseUrl) {
+        localStorage.setItem('probality_ollama_base_url', updates.ollamaBaseUrl);
+    }
+    if (updates.ollamaModel) {
+        localStorage.setItem('probality_ollama_model', updates.ollamaModel);
+    }
+
+    const newSettings = getLlmSettings();
+    window.dispatchEvent(new CustomEvent('probality_llm_settings_changed', { detail: newSettings }));
+    return newSettings;
+};
+
+export interface ConnectionTestResult {
+    success: boolean;
+    message: string;
+    models?: string[];
+}
+
+export const testOllamaConnection = async (baseUrl: string): Promise<ConnectionTestResult> => {
+    try {
+        const response = await fetch(`${baseUrl}/api/tags`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+            },
+        });
+        if (!response.ok) {
+            return { success: false, message: `Server returned status ${response.status}.` };
+        }
+        const data = await response.json();
+        const models = (data.models || []).map((m: any) => m.name);
+        return {
+            success: true,
+            message: 'Connected successfully!',
+            models,
+        };
+    } catch (error) {
+        return {
+            success: false,
+            message: 'Could not connect. Is Ollama running on your system?',
+        };
+    }
+};
+
+export const testGeminiConnection = async (apiKey: string, model: string): Promise<ConnectionTestResult> => {
+    if (!apiKey) {
+        return { success: false, message: 'API key is missing.' };
+    }
+    try {
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: 'Say only the word "OK"',
+            config: {
+                maxOutputTokens: 5,
+            },
+        });
+        if (response.text) {
+            return { success: true, message: 'Connected successfully!' };
+        }
+        return { success: false, message: 'Empty response received from Gemini.' };
+    } catch (error: any) {
+        return {
+            success: false,
+            message: error?.message || 'Connection failed. Please check your API key.',
+        };
+    }
+};
+
 const tutorSystemInstruction = `You are Dr. B, a friendly and rigorous probability professor in the style of Joe Blitzstein. You love story proofs, building intuition before formulas, and helping students navigate the four types of sampling (ordered/unordered, with/without replacement).
 
 Scope: You only help with the following topics from this course: the Naive Definition of Probability, the Multiplication Rule, the Sampling Table, and Story Proofs. If a student asks about anything outside these four topics, warmly redirect them: "That's beyond what we're covering here — let's get back to [relevant topic]."
@@ -96,7 +231,7 @@ const fallbackQuizQuestionEasy: QuizQuestion = {
         "By the naive definition, $P(A) = \\frac{|A|}{|S|}$. There are 3 red balls out of 5 equally likely outcomes, so $P(\\text{red}) = \\frac{3}{5}$. The option $\\frac{3}{2}$ is a classic error of dividing favorable by unfavorable outcomes instead of total outcomes.",
 };
 
-const fallbackQuizQuestion: QuizQuestion = {
+const fallbackQuizQuestionMedium: QuizQuestion = {
     question: "In how many ways can we choose 3 scoops of ice cream from 5 flavors if order doesn't matter and repetition is allowed?",
     options: ['10', '60', '35', '125'],
     correctIndex: 2,
@@ -107,62 +242,69 @@ const fallbackQuizQuestion: QuizQuestion = {
         "$60 = 5 \\times 4 \\times 3$ (ordered, no replacement), and $125 = 5^3$ (ordered, with replacement).",
 };
 
+const fallbackQuizQuestionHard: QuizQuestion = {
+    question:
+        "A committee of 3 is chosen from 4 men and 4 women. How many committees contain " +
+        "at least one man and at least one woman?",
+    options: ["48", "56", "32", "16"],
+    correctIndex: 0,
+    explanation:
+        "Use complementary counting: subtract the all-male and all-female committees from the total. " +
+        "Total committees: $\\binom{8}{3} = 56$. " +
+        "All-male: $\\binom{4}{3} = 4$. All-female: $\\binom{4}{3} = 4$. " +
+        "Mixed committees: $56 - 4 - 4 = 48$. " +
+        "A common error is direct casework — counting $\\binom{4}{1}\\binom{4}{2} + \\binom{4}{2}\\binom{4}{1} = 48$ also works, " +
+        "but complementary counting is faster and less error-prone here. " +
+        "The trap answer $56$ forgets to subtract the all-same-gender cases, and $32$ is a classic halving error.",
+};
+
 export const generateQuizQuestion = async (topic: string, difficulty: Difficulty): Promise<QuizQuestion> => {
+    const settings = getLlmSettings();
     try {
-        if (provider === 'ollama') {
-            return await generateQuizQuestionWithOllama(topic, difficulty);
+        if (settings.provider === 'ollama') {
+            return await generateQuizQuestionWithOllama(topic, difficulty, settings);
         }
 
-        return await generateQuizQuestionWithGemini(topic, difficulty);
+        return await generateQuizQuestionWithGemini(topic, difficulty, settings);
     } catch (error) {
         console.error('Quiz Generation Error:', error);
-        if (difficulty == 'easy') {
-            return fallbackQuizQuestionEasy;
-        }
-        return fallbackQuizQuestion;
+        if (difficulty === 'easy') return fallbackQuizQuestionEasy;
+        if (difficulty === 'hard') return fallbackQuizQuestionHard;
+        return fallbackQuizQuestionMedium;
     }
 };
 
 export const getTutorResponse = async (history: ChatHistoryEntry[], currentMessage: string): Promise<string> => {
+    const settings = getLlmSettings();
     try {
-        if (provider === 'ollama') {
-            return await getTutorResponseWithOllama(history, currentMessage);
+        if (settings.provider === 'ollama') {
+            return await getTutorResponseWithOllama(history, currentMessage, settings);
         }
 
-        return await getTutorResponseWithGemini(history, currentMessage);
+        return await getTutorResponseWithGemini(history, currentMessage, settings);
     } catch (error) {
         console.error('Chat Error:', error);
 
-        if (provider === 'ollama') {
+        if (settings.provider === 'ollama') {
             return "I'm having trouble reaching your local Ollama server right now. Make sure Ollama is running and the selected model is available.";
         }
 
-        return "I'm having trouble connecting to Gemini right now. Check your VITE_GEMINI_API_KEY and try again.";
+        return "I'm having trouble connecting to Gemini right now. Check your API key and try again.";
     }
 };
 
-function getProvider(): Provider {
-    const configuredProvider = env.VITE_LLM_PROVIDER?.trim().toLowerCase();
-
-    if (configuredProvider === 'gemini' || configuredProvider === 'ollama') {
-        return configuredProvider;
+function getGeminiClient(apiKey: string): GoogleGenAI {
+    if (!apiKey) {
+        throw new Error('Missing Gemini API key.');
     }
 
-    return env.VITE_GEMINI_API_KEY ? 'gemini' : 'ollama';
+    return new GoogleGenAI({apiKey});
 }
 
-function getGeminiClient(): GoogleGenAI {
-    if (!geminiApiKey) {
-        throw new Error('Missing VITE_GEMINI_API_KEY for Gemini provider.');
-    }
-
-    return new GoogleGenAI({apiKey: geminiApiKey});
-}
-
-async function generateQuizQuestionWithGemini(topic: string, difficulty: Difficulty): Promise<QuizQuestion> {
-    const ai = getGeminiClient();
+async function generateQuizQuestionWithGemini(topic: string, difficulty: Difficulty, settings: LlmSettings): Promise<QuizQuestion> {
+    const ai = getGeminiClient(settings.geminiApiKey);
     const response = await ai.models.generateContent({
-        model: geminiModel,
+        model: settings.geminiModel,
         contents: buildQuizPrompt(topic, difficulty),
         config: {
             responseMimeType: 'application/json',
@@ -179,14 +321,14 @@ async function generateQuizQuestionWithGemini(topic: string, difficulty: Difficu
     return parseQuizQuestion(text);
 }
 
-async function generateQuizQuestionWithOllama(topic: string, difficulty: Difficulty): Promise<QuizQuestion> {
-    const response = await fetch(`${ollamaBaseUrl}/api/generate`, {
+async function generateQuizQuestionWithOllama(topic: string, difficulty: Difficulty, settings: LlmSettings): Promise<QuizQuestion> {
+    const response = await fetch(`${settings.ollamaBaseUrl}/api/generate`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            model: ollamaModel,
+            model: settings.ollamaModel,
             stream: false,
             format: 'json',
             prompt: buildQuizPrompt(topic, difficulty),
@@ -208,12 +350,12 @@ async function generateQuizQuestionWithOllama(topic: string, difficulty: Difficu
     return parseQuizQuestion(data.response);
 }
 
-async function getTutorResponseWithGemini(history: ChatHistoryEntry[], currentMessage: string): Promise<string> {
-    const ai = getGeminiClient();
+async function getTutorResponseWithGemini(history: ChatHistoryEntry[], currentMessage: string, settings: LlmSettings): Promise<string> {
+    const ai = getGeminiClient(settings.geminiApiKey);
     const {priorHistory, nextMessage} = splitHistoryForReply(history, currentMessage);
 
     const chat = ai.chats.create({
-        model: geminiModel,
+        model: settings.geminiModel,
         config: {
             systemInstruction: tutorSystemInstruction,
         },
@@ -227,15 +369,15 @@ async function getTutorResponseWithGemini(history: ChatHistoryEntry[], currentMe
     return result.text || "I'm sorry, I lost my train of thought. Could you ask that again?";
 }
 
-async function getTutorResponseWithOllama(history: ChatHistoryEntry[], currentMessage: string): Promise<string> {
+async function getTutorResponseWithOllama(history: ChatHistoryEntry[], currentMessage: string, settings: LlmSettings): Promise<string> {
     const {fullConversation} = splitHistoryForReply(history, currentMessage);
-    const response = await fetch(`${ollamaBaseUrl}/api/chat`, {
+    const response = await fetch(`${settings.ollamaBaseUrl}/api/chat`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            model: ollamaModel,
+            model: settings.ollamaModel,
             stream: false,
             messages: [
                 {role: 'system', content: tutorSystemInstruction},

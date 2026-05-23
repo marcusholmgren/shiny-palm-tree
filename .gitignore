@@ -44,3 +44,5 @@ packages/react-devtools-timeline/dist
 
 .env
 dist
+
+.antigravitycli
