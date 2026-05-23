@@ -4,6 +4,11 @@ import Quiz from './components/Quiz';
 import Tutor from './components/Tutor';
 import MathRenderer from './components/MathRenderer';
 import LlmSettingsPanel from './components/LlmSettingsPanel';
+import NaiveDefinitionVisualizer from './components/NaiveDefinitionVisualizer';
+import MultiplicationRuleVisualizer from './components/MultiplicationRuleVisualizer';
+import StoryProofsVisualizer from './components/StoryProofsVisualizer';
+import ComplementCountingVisualizer from './components/ComplementCountingVisualizer';
+import InclusionExclusionVisualizer from './components/InclusionExclusionVisualizer';
 import {getLlmSettings, LlmSettings} from './services/geminiService';
 import {SamplingMode, TopicId, Topic} from './types';
 import {BookOpen, Calculator, ChevronRight, Layout, Sigma, Settings} from 'lucide-react';
@@ -71,67 +76,101 @@ const App: React.FC = () => {
     }, []);
 
     const renderContent = () => {
-        if (currentTopic.id === TopicId.SAMPLING_TABLE) {
-            return (
-                <div className="space-y-8">
-                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                        <h2 className="text-2xl font-bold text-slate-900 mb-4">
-                            Mastering the Sampling Table
-                        </h2>
-                        <p className="text-slate-600 leading-relaxed mb-4">
-                            Whenever you choose <MathRenderer text="$k$"/> items from a group of{" "}
-                            <MathRenderer text="$n$"/>, stop and ask yourself two questions:
-                        </p>
-                        <ul className="list-disc pl-5 space-y-3 text-slate-700 mb-6">
-                            <li>
-                                <strong>Does order matter?</strong> Would rearranging the selection
-                                give a different outcome? (Race rankings: yes. Committee members: no.)
-                            </li>
-                            <li>
-                                <strong>Is replacement allowed?</strong> Can the same item appear
-                                more than once? (PIN digits: yes. Dealing cards: no.)
-                            </li>
-                        </ul>
-                        <p className="text-slate-600 mb-4">
-                            Your answers place you in one of four cells — each with its own
-                            formula. Once you identify the right cell, the counting follows
-                            automatically.
-                        </p>
-                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-slate-700 text-sm">
-                            <strong>Worked example:</strong> How many 3-digit PINs can you make
-                            from digits 0–9? Order matters (123 ≠ 321) and repetition is allowed
-                            (111 is valid) →{" "}
-                            <MathRenderer text="$n^k = 10^3 = 1000$"/>
-                        </div>
+        switch (currentTopic.id) {
+            case TopicId.NAIVE_DEF:
+                return (
+                    <div className="space-y-8">
+                        <NaiveDefinitionVisualizer />
+                        <Quiz topic={currentTopic.title} />
                     </div>
-
-                    <SamplingTable onSelectionChange={setSamplingSelection}/>
-
-                    <Quiz
-                        topic={samplingSelection.topic}/>
-                </div>
-            );
-        }
-
-        // Placeholder for other topics to keep the demo focused on the requested functionality
-        return (
-            <div className="space-y-8">
-                <div className="bg-white p-8 rounded-xl border border-slate-200 text-center">
-                    <Sigma className="w-16 h-16 text-indigo-200 mx-auto mb-4"/>
-                    <h2 className="text-2xl font-bold text-slate-900 mb-2">{currentTopic.title}</h2>
-                    <p className="text-slate-600 max-w-2xl mx-auto mb-6">
-                        <MathRenderer text={currentTopic.description}/>
-                    </p>
-                    {currentTopic.formula && (
-                        <div
-                            className="inline-block bg-white px-8 py-4 rounded-xl font-mono text-indigo-600 border border-slate-200 shadow-sm">
-                            <MathRenderer text={`${currentTopic.formula}`}/>
+                );
+            case TopicId.MULTIPLICATION:
+                return (
+                    <div className="space-y-8">
+                        <MultiplicationRuleVisualizer />
+                        <Quiz topic={currentTopic.title} />
+                    </div>
+                );
+            case TopicId.SAMPLING_TABLE:
+                return (
+                    <div className="space-y-8">
+                        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                            <h2 className="text-2xl font-bold text-slate-900 mb-4">
+                                Mastering the Sampling Table
+                            </h2>
+                            <p className="text-slate-600 leading-relaxed mb-4">
+                                Whenever you choose <MathRenderer text="$k$"/> items from a group of{" "}
+                                <MathRenderer text="$n$"/>, stop and ask yourself two questions:
+                            </p>
+                            <ul className="list-disc pl-5 space-y-3 text-slate-700 mb-6">
+                                <li>
+                                    <strong>Does order matter?</strong> Would rearranging the selection
+                                    give a different outcome? (Race rankings: yes. Committee members: no.)
+                                </li>
+                                <li>
+                                    <strong>Is replacement allowed?</strong> Can the same item appear
+                                    more than once? (PIN digits: yes. Dealing cards: no.)
+                                </li>
+                            </ul>
+                            <p className="text-slate-600 mb-4">
+                                Your answers place you in one of four cells — each with its own
+                                formula. Once you identify the right cell, the counting follows
+                                automatically.
+                            </p>
+                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-slate-700 text-sm">
+                                <strong>Worked example:</strong> How many 3-digit PINs can you make
+                                from digits 0–9? Order matters (123 ≠ 321) and repetition is allowed
+                                (111 is valid) →{" "}
+                                <MathRenderer text="$n^k = 10^3 = 1000$"/>
+                            </div>
                         </div>
-                    )}
-                </div>
-                <Quiz topic={currentTopic.title}/>
-            </div>
-        );
+
+                        <SamplingTable onSelectionChange={setSamplingSelection}/>
+
+                        <Quiz topic={samplingSelection.topic}/>
+                    </div>
+                );
+            case TopicId.STORY_PROOFS:
+                return (
+                    <div className="space-y-8">
+                        <StoryProofsVisualizer />
+                        <Quiz topic={currentTopic.title} />
+                    </div>
+                );
+            case TopicId.COMPLEMENT:
+                return (
+                    <div className="space-y-8">
+                        <ComplementCountingVisualizer />
+                        <Quiz topic={currentTopic.title} />
+                    </div>
+                );
+            case TopicId.INCLUSION_EXCLUSION:
+                return (
+                    <div className="space-y-8">
+                        <InclusionExclusionVisualizer />
+                        <Quiz topic={currentTopic.title} />
+                    </div>
+                );
+            default:
+                return (
+                    <div className="space-y-8">
+                        <div className="bg-white p-8 rounded-xl border border-slate-200 text-center">
+                            <Sigma className="w-16 h-16 text-indigo-200 mx-auto mb-4"/>
+                            <h2 className="text-2xl font-bold text-slate-900 mb-2">{currentTopic.title}</h2>
+                            <p className="text-slate-600 max-w-2xl mx-auto mb-6">
+                                <MathRenderer text={currentTopic.description}/>
+                            </p>
+                            {currentTopic.formula && (
+                                <div
+                                    className="inline-block bg-white px-8 py-4 rounded-xl font-mono text-indigo-600 border border-slate-200 shadow-sm">
+                                    <MathRenderer text={`${currentTopic.formula}`}/>
+                                </div>
+                            )}
+                        </div>
+                        <Quiz topic={currentTopic.title}/>
+                    </div>
+                );
+        }
     };
 
     return (
