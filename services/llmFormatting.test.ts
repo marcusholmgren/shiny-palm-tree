@@ -25,6 +25,13 @@ describe('normalizeMathText', () => {
         expect(normalizeMathText('\\\\frac{7!}{3!}')).toBe('$\\frac{7!}{3!}$');
         expect(normalizeMathText('Use $\\\\binom{10}{3}$ here.')).toBe('Use $\\binom{10}{3}$ here.');
     });
+
+    it('does not swallow adjacent English words of length >= 3 when wrapping bare math fragments', () => {
+        const input = 'By the Inclusion-Exclusion principle, |A \\cup B| = |A| + |B| - |A \\cap B|, which gives 17 = 12 + 10 - |A \\cap B|.';
+        const result = normalizeMathText(input);
+        expect(result).toContain('which gives');
+        expect(result).not.toContain('whichgives');
+    });
 });
 
 describe('normalizeQuizQuestion', () => {

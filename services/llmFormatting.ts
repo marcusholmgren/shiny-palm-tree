@@ -2,7 +2,7 @@ import {QuizQuestion} from '../types';
 
 const MATH_TEXT_SPLIT_PATTERN = /(\$\$[\s\S]+?\$\$|\$[^$]+?\$)/;
 const BARE_INLINE_LATEX_FRAGMENT_PATTERN =
-    /\\[a-zA-Z]+(?:\{[^{}]*\})*(?:\s*(?:\\[a-zA-Z]+(?:\{[^{}]*\})*|[0-9]+(?:\.[0-9]+)?(?:\/[0-9]+(?:\.[0-9]+)?)?|[A-Za-z]{1,2}|[=+\-*/^_(),{}!|<>\[\]]))+\$?/g;
+    /\\[a-zA-Z]+(?:\{[^{}]*\})*(?:\s*(?:\\[a-zA-Z]+(?:\{[^{}]*\})*|[0-9]+(?:\.[0-9]+)?(?:\/[0-9]+(?:\.[0-9]+)?)?|(?<![A-Za-z])[A-Za-z]{1,2}(?![A-Za-z])|[=+\-*/^_(),{}!|<>\[\]]))+\$?/g;
 
 const isDelimitedMathSegment = (segment: string): boolean => {
     return (
