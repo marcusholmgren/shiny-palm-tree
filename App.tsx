@@ -9,9 +9,11 @@ import MultiplicationRuleVisualizer from './components/MultiplicationRuleVisuali
 import StoryProofsVisualizer from './components/StoryProofsVisualizer';
 import ComplementCountingVisualizer from './components/ComplementCountingVisualizer';
 import InclusionExclusionVisualizer from './components/InclusionExclusionVisualizer';
+import PracticeDashboard from './components/PracticeDashboard';
 import {getLlmSettings, LlmSettings} from './services/geminiService';
+import {getStats, ProbalityStats} from './services/statsService';
 import {SamplingMode, TopicId, Topic} from './types';
-import {BookOpen, Calculator, ChevronRight, Layout, Sigma, Settings} from 'lucide-react';
+import {BookOpen, Calculator, ChevronRight, Layout, Sigma, Settings, BarChart3, Flame} from 'lucide-react';
 
 const topics: Topic[] = [
     {
@@ -59,6 +61,8 @@ const App: React.FC = () => {
     );
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [llmSettings, setLlmSettings] = useState<LlmSettings>(getLlmSettings());
+    const [activeView, setActiveView] = useState<'dashboard' | 'practice'>('dashboard');
+    const [stats, setStats] = useState<ProbalityStats>(getStats());
 
     useEffect(() => {
         const handleSettingsChange = (e: Event) => {
@@ -75,20 +79,50 @@ const App: React.FC = () => {
         };
     }, []);
 
+    useEffect(() => {
+        const handleStatsUpdate = (e: Event) => {
+            const customEvent = e as CustomEvent<ProbalityStats>;
+            if (customEvent.detail) {
+                setStats(customEvent.detail);
+            } else {
+                setStats(getStats());
+            }
+        };
+        window.addEventListener('probality_stats_updated', handleStatsUpdate);
+        return () => {
+            window.removeEventListener('probality_stats_updated', handleStatsUpdate);
+        };
+    }, []);
+
     const renderContent = () => {
+        if (activeView === 'dashboard') {
+            return (
+                <PracticeDashboard 
+                    topics={topics} 
+                    onSelectTopic={(topicId) => {
+                        const target = topics.find((t) => t.id === topicId);
+                        if (target) {
+                            setCurrentTopic(target);
+                            setActiveView('practice');
+                        }
+                    }}
+                />
+            );
+        }
+
         switch (currentTopic.id) {
             case TopicId.NAIVE_DEF:
                 return (
                     <div className="space-y-8">
                         <NaiveDefinitionVisualizer />
-                        <Quiz topic={currentTopic.title} />
+                        <Quiz topicId={currentTopic.id} topicTitle={currentTopic.title} />
                     </div>
                 );
             case TopicId.MULTIPLICATION:
                 return (
                     <div className="space-y-8">
                         <MultiplicationRuleVisualizer />
-                        <Quiz topic={currentTopic.title} />
+                        <Quiz topicId={currentTopic.id} topicTitle={currentTopic.title} />
                     </div>
                 );
             case TopicId.SAMPLING_TABLE:
@@ -127,28 +161,28 @@ const App: React.FC = () => {
 
                         <SamplingTable onSelectionChange={setSamplingSelection}/>
 
-                        <Quiz topic={samplingSelection.topic}/>
+                        <Quiz topicId={currentTopic.id} topicTitle={samplingSelection.topic}/>
                     </div>
                 );
             case TopicId.STORY_PROOFS:
                 return (
                     <div className="space-y-8">
                         <StoryProofsVisualizer />
-                        <Quiz topic={currentTopic.title} />
+                        <Quiz topicId={currentTopic.id} topicTitle={currentTopic.title} />
                     </div>
                 );
             case TopicId.COMPLEMENT:
                 return (
                     <div className="space-y-8">
                         <ComplementCountingVisualizer />
-                        <Quiz topic={currentTopic.title} />
+                        <Quiz topicId={currentTopic.id} topicTitle={currentTopic.title} />
                     </div>
                 );
             case TopicId.INCLUSION_EXCLUSION:
                 return (
                     <div className="space-y-8">
                         <InclusionExclusionVisualizer />
-                        <Quiz topic={currentTopic.title} />
+                        <Quiz topicId={currentTopic.id} topicTitle={currentTopic.title} />
                     </div>
                 );
             default:
@@ -167,7 +201,7 @@ const App: React.FC = () => {
                                 </div>
                             )}
                         </div>
-                        <Quiz topic={currentTopic.title}/>
+                        <Quiz topicId={currentTopic.id} topicTitle={currentTopic.title}/>
                     </div>
                 );
         }
@@ -185,27 +219,80 @@ const App: React.FC = () => {
                             <span>Probability</span>
                         </div>
                         <p className="text-xs text-slate-400 mt-1">Interactive Counting</p>
+
+                        {/* Sidebar Progress & Streak Widget */}
+                        {(() => {
+                            const totalPointsSidebar = Object.values(stats.mastery).reduce((sum, item) => sum + Math.min(item.correct, 5), 0);
+                            const overallProgressPercent = Math.round((totalPointsSidebar / (topics.length * 5)) * 100);
+                            return (
+                                <div className="mt-4 pt-4 border-t border-slate-100/70 flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5" title="First-try Answer Streak">
+                                        <Flame className={`w-4 h-4 ${stats.streak > 0 ? 'text-amber-500 drop-shadow-[0_0_4px_rgba(245,158,11,0.5)] animate-pulse' : 'text-slate-300'}`} />
+                                        <span className={`text-xs font-bold ${stats.streak > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+                                            {stats.streak} Streak
+                                        </span>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-1 flex-1 max-w-[90px]">
+                                        <div className="flex justify-between w-full text-[9px] font-bold text-slate-400">
+                                            <span>Mastery</span>
+                                            <span>{overallProgressPercent}%</span>
+                                        </div>
+                                        <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden border border-slate-200/50">
+                                            <div 
+                                                className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
+                                                style={{width: `${overallProgressPercent}%`}}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
 
                     <nav className="p-4 space-y-1">
-                        {topics.map(topic => (
-                            <button
-                                key={topic.id}
-                                onClick={() => setCurrentTopic(topic)}
-                                className={`w-full flex items-center justify-between p-3 rounded-lg text-sm font-medium transition-all ${
-                                    currentTopic.id === topic.id
-                                        ? 'bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-200'
-                                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                                }`}
-                            >
-                                <div className="flex items-center gap-3">
-                                    {topic.id === TopicId.SAMPLING_TABLE ? <Calculator className="w-4 h-4"/> :
-                                        <BookOpen className="w-4 h-4"/>}
-                                    {topic.title}
-                                </div>
-                                {currentTopic.id === topic.id && <ChevronRight className="w-4 h-4 opacity-50"/>}
-                            </button>
-                        ))}
+                        <button
+                            onClick={() => setActiveView('dashboard')}
+                            className={`w-full flex items-center justify-between p-3 rounded-lg text-sm font-semibold transition-all mb-4 ${
+                                activeView === 'dashboard'
+                                    ? 'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white shadow-md'
+                                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 border border-transparent'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <BarChart3 className="w-4 h-4"/>
+                                Progress Hub
+                            </div>
+                            {activeView === 'dashboard' && <ChevronRight className="w-4 h-4 opacity-75"/>}
+                        </button>
+
+                        <div className="text-[9px] uppercase font-bold text-slate-400 px-3 mb-2 tracking-wider">
+                            Counting Topics
+                        </div>
+
+                        {topics.map(topic => {
+                            const isSelected = activeView === 'practice' && currentTopic.id === topic.id;
+                            return (
+                                <button
+                                    key={topic.id}
+                                    onClick={() => {
+                                        setCurrentTopic(topic);
+                                        setActiveView('practice');
+                                    }}
+                                    className={`w-full flex items-center justify-between p-3 rounded-lg text-sm font-medium transition-all ${
+                                        isSelected
+                                            ? 'bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-200'
+                                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        {topic.id === TopicId.SAMPLING_TABLE ? <Calculator className="w-4 h-4"/> :
+                                            <BookOpen className="w-4 h-4"/>}
+                                        {topic.title}
+                                    </div>
+                                    {isSelected && <ChevronRight className="w-4 h-4 opacity-50"/>}
+                                </button>
+                            );
+                        })}
                     </nav>
                 </div>
 
@@ -246,12 +333,14 @@ const App: React.FC = () => {
 
             {/* Main Content */}
             <main className="flex-1 p-4 md:p-8 lg:p-12 overflow-y-auto max-w-5xl mx-auto w-full">
-                <header className="mb-8 pb-6 border-b border-slate-200">
-                    <h1 className="text-3xl font-bold text-slate-900">{currentTopic.title}</h1>
-                    <p className="text-slate-500 mt-2 text-lg">
-                        <MathRenderer text={currentTopic.description}/>
-                    </p>
-                </header>
+                {activeView !== 'dashboard' && (
+                    <header className="mb-8 pb-6 border-b border-slate-200">
+                        <h1 className="text-3xl font-bold text-slate-900">{currentTopic.title}</h1>
+                        <p className="text-slate-500 mt-2 text-lg">
+                            <MathRenderer text={currentTopic.description}/>
+                        </p>
+                    </header>
+                )}
 
                 {renderContent()}
             </main>

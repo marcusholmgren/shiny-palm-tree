@@ -65,7 +65,7 @@ Currently, the Tutor overlay is a generic chat drawer, unaware of the student's 
 *   **"Ask Dr. B for a Hint" Button**: Inside the Quiz card, add a button that passes the current question's text and options to the Tutor behind the scenes.
 *   **Socratic Interventions**: Dr. B will open up and prompt the student with a highly targeted question about the specific problem (e.g., *"We want to form a committee. Does the order of members matter? Are we allowed to pick the same person twice?"*) rather than giving away the formula or numerical answer.
 
-### Option 4: Gamified Practice Stats & Streak Tracking
+### ✅ Option 4: Gamified Practice Stats & Streak Tracking
 To keep students motivated and encourage consistent practice:
 *   **Topic Masteries**: Track practice stats per topic (e.g., "Naive Definition: 4/5 Correct", "Sampling Table: 3/3 Correct") in `localStorage`.
 *   **Streak Tracking**: Implement a "First-Try Streak" counter that rewards students with subtle confetti or micro-animations when they answer consecutive questions correctly without seeing the solution first.
